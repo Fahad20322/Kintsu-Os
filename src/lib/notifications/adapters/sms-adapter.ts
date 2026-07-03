@@ -24,7 +24,7 @@ export class SmsAdapter implements NotificationAdapter {
     this.senderId = senderId;
   }
 
-  async send(input: NotificationSendInput): Promise<NotificationSendResult> {
+  async send(_input: NotificationSendInput): Promise<NotificationSendResult> {
     try {
       // TODO: uncomment when SMS_API_KEY is provisioned. Example shape for a
       // generic REST SMS gateway:

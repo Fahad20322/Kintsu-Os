@@ -16,7 +16,6 @@ import {
   saleItem,
   payment,
   returnRecord,
-  exchangeRecord,
   couponCode,
   giftCard,
 } from "./sales";

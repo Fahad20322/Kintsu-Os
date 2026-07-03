@@ -28,7 +28,7 @@ export class WhatsAppAdapter implements NotificationAdapter {
     this.phoneId = phoneId;
   }
 
-  async send(input: NotificationSendInput): Promise<NotificationSendResult> {
+  async send(_input: NotificationSendInput): Promise<NotificationSendResult> {
     try {
       // TODO: uncomment when WHATSAPP_API_KEY is provisioned.
       // WhatsApp Cloud API shape (https://developers.facebook.com/docs/whatsapp/cloud-api):

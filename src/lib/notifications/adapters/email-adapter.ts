@@ -38,7 +38,7 @@ export class EmailAdapter implements NotificationAdapter {
     this.from = from;
   }
 
-  async send(input: NotificationSendInput): Promise<NotificationSendResult> {
+  async send(_input: NotificationSendInput): Promise<NotificationSendResult> {
     try {
       // TODO: uncomment when EMAIL_SMTP_* is provisioned (requires `npm install nodemailer`).
       //
