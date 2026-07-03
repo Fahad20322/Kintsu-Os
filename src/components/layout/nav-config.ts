@@ -14,6 +14,7 @@ import {
   Gift,
   Sparkles,
   Settings,
+  Bell,
 } from "lucide-react";
 import type { Permission } from "@/lib/rbac";
 
@@ -61,6 +62,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { title: "Reports", href: "/reports", icon: BarChart3, permission: "reports:view" },
       { title: "Staff", href: "/staff", icon: UserCog, permission: "staff:view" },
       { title: "Assistant", href: "/assistant", icon: Sparkles, permission: "assistant:use" },
+      { title: "Notifications", href: "/notifications", icon: Bell, permission: "settings:view" },
       { title: "Settings", href: "/settings", icon: Settings, permission: "settings:view" },
     ],
   },
