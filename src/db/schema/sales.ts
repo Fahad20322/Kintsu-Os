@@ -56,6 +56,10 @@ export const sale = pgTable("sale", {
   cashierId: text("cashier_id")
     .notNull()
     .references(() => user.id, { onDelete: "restrict" }),
+  // Client-generated idempotency key for offline POS sync: lets a queued
+  // sale be retried safely (e.g. after a flaky connection) without risking
+  // a duplicate checkout. Null for sales created while online.
+  clientRequestId: text("client_request_id").unique(),
 
   subtotal: numeric("subtotal", { precision: 14, scale: 2 }).notNull(),
   discountAmount: numeric("discount_amount", { precision: 14, scale: 2 })

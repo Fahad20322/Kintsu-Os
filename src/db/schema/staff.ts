@@ -53,10 +53,12 @@ export const commission = pgTable("commission", {
 export const auditLog = pgTable("audit_log", {
   id: text("id").primaryKey().$defaultFn(() => createId()),
   userId: text("user_id").references(() => user.id, { onDelete: "set null" }),
+  storeId: text("store_id").references(() => store.id, { onDelete: "set null" }),
   action: text("action").notNull(),
   entityType: text("entity_type").notNull(),
   entityId: text("entity_id"),
   metadata: text("metadata"), // JSON string
   ipAddress: text("ip_address"),
+  userAgent: text("user_agent"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });

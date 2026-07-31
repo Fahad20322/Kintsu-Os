@@ -92,6 +92,122 @@ for UX; hiding a link is not itself a security control.
   inventory and upserts the customer. A dedicated `onlineOrder` table would
   be the natural next step if website orders need their own lifecycle.
 
+## Module 0 — Cloud architecture
+
+The spec for Module 0 asks for a full enterprise cloud platform: multi-region
+HA, auto-failover, database replication, 99.9% uptime, a CDN, and more. Most
+of that is a property of *where and how* this app is deployed, not something
+application code can create by itself — a Next.js app cannot make a single
+Postgres instance replicate itself. So this module was built the same way
+the rest of the app is: real, working code for everything that *is*
+application-level, wired through pluggable adapters that fall back to a
+local/dev implementation when no cloud credentials are configured (the same
+pattern as the notifications adapters, see above) — and clear documentation
+of what's a deployment-platform responsibility instead.
+
+**Implemented in code, real and exercisable today:**
+
+- **Cache / rate limiting** (`src/lib/cache.ts`, `src/lib/rate-limit.ts`,
+  `src/proxy.ts`): a `CacheStore` interface with a Redis adapter (`ioredis`,
+  works with self-hosted Redis, Valkey, or Upstash — set `REDIS_URL`) and an
+  in-memory fallback. `proxy.ts` (Next.js 16 renamed `middleware.ts` →
+  `proxy.ts`, and it now always runs on the Node.js runtime, not Edge —
+  see the upgrade notes in `node_modules/next/dist/docs`) rate-limits
+  `/api/auth/*` and `/api/integrations/*` per-IP. The in-memory fallback
+  only shares state within one instance — set `REDIS_URL` for correct
+  limits behind a load balancer.
+- **Event bus** (`src/lib/events/`): an in-process `EventEmitter`-backed
+  pub/sub with a typed event map (`sale.completed`, `inventory.updated`,
+  `purchase.received`, `customer.created`, `loyalty.points_earned`,
+  `bridal.status_changed`). Producers (`src/actions/*.ts`) and the one
+  subscriber registered today (the audit logger, `src/lib/events/subscribers.ts`)
+  only ever talk to `emitEvent`/`onEvent` — swapping the in-process bus for
+  SNS/EventBridge/Kafka/Redis Streams later is a change to `bus.ts` alone.
+- **Audit trail** (`src/lib/audit.ts`, `audit_log` table): every event-bus
+  subscriber, plus direct calls from the actions that don't go through the
+  bus, write a row capturing user, store, IP, user-agent and time. Covers
+  login/logout (via Better Auth hooks in `src/lib/auth.ts`), product
+  edit/price-change/deactivate, purchase order create/receive/cancel,
+  billing, return, and exchange — the exact action list the spec calls out.
+  Inventory changes also have a dedicated ledger (`stockMovement`, see
+  above) which already carries who/why/when per movement.
+- **File storage** (`src/lib/storage/`): `putObject`/`deleteObject` behind
+  an adapter interface. `S3StorageAdapter` talks to AWS S3 or Cloudflare R2
+  (same API, just point `S3_ENDPOINT` at R2) via `@aws-sdk/client-s3`;
+  `LocalDiskAdapter` writes to `public/uploads` when `S3_BUCKET` isn't set.
+  Wired into a real feature — product image upload
+  (`src/actions/uploads.ts`, the "Images" card in the product form) — not
+  just left as unused scaffolding.
+- **Secure auth** (`src/lib/auth.ts`): Better Auth's `twoFactor` (TOTP +
+  backup codes) and `emailOTP` (passwordless login, delivered through the
+  existing notification pipeline) plugins, both wired into the login form
+  and a new Settings → Security tab. Session/device management and login
+  history use Better Auth's built-in session API (`listSessions`,
+  `revokeSession`) plus the audit trail above — no extra plugin needed for
+  those.
+- **Health check** (`src/app/api/health/route.ts`): checks DB connectivity
+  and latency; wired into the `Dockerfile`'s `HEALTHCHECK` and is the
+  natural target for a load balancer or uptime monitor.
+- **Backups** (`scripts/backup.sh`, `scripts/restore.sh`): `pg_dump`-based,
+  daily/weekly/monthly retention, optional upload to S3/R2 via the AWS CLI.
+  Point-in-time recovery and cross-region replication are the managed
+  Postgres provider's job (see below) — this script is the logical dump
+  rotation layered on top of that.
+- **Offline POS** (`src/lib/offline/`, wired into `pos-terminal.tsx`): if a
+  checkout can't reach the server (offline, or the request fails), the
+  cart is saved to IndexedDB with a client-generated `clientRequestId` and
+  auto-synced on reconnect; the server dedupes on that ID so a retried
+  sync can't double-bill. This covers the realistic failure mode — the
+  connection drops between building the cart and submitting it — not full
+  offline product/price browsing, which would need a local product cache
+  and is a larger, separate feature.
+- **CI/CD** (`.github/workflows/ci.yml`): install → lint → typecheck →
+  build → Docker build on every push/PR.
+
+**Deployment-platform responsibilities (config, not code):**
+
+- **High availability / auto-failover / DB replication / 99.9% uptime /
+  point-in-time recovery**: properties of the managed Postgres service you
+  deploy to (RDS Multi-AZ, Cloud SQL HA, Neon, Supabase, ...) plus running
+  more than one app instance behind a load balancer pointed at
+  `/api/health`. `docker-compose.yml` demonstrates the shape (Postgres +
+  Redis + app, each with health checks) but a single `docker compose up`
+  is not itself highly available — that's what the managed cloud provider
+  gives you.
+- **CDN**: put Cloudflare/CloudFront in front of the app and the file
+  storage bucket. `next.config.ts`'s image handling and the storage
+  adapter's public URLs both work unchanged behind a CDN.
+- **Multi-region / nationwide scaling**: the schema is already multi-store
+  (see "Data model" above) with no per-store code paths — going from 1
+  store to 100 is a data/ops question, not a rewrite. Running the app
+  itself in multiple regions in front of one primary database is a
+  deployment topology choice.
+
+## Path to multi-tenant SaaS
+
+Today every deployment is single-brand: one Postgres database, any number
+of `store` rows, no tenant boundary above the store. To become a
+multi-tenant SaaS platform (each retailer gets isolated data on shared
+infrastructure) without a rewrite:
+
+1. Add an `organization` table and an `organizationId` column to `store`
+   (and, if per-tenant user pools are desired, to `user`). This is an
+   additive migration — every existing table is already scoped by
+   `storeId`, so `organization` slots in as a parent of `store` rather than
+   requiring every table to be touched.
+2. Scope `requirePermission`/`requireUser` (`src/lib/session.ts`) to also
+   assert the acting user's organization matches the resource's
+   organization — one additional check alongside the existing role check.
+3. Better Auth ships an `organization` plugin (see
+   `node_modules/better-auth/dist/plugins/organization`) that covers
+   invitations, org-scoped roles and switching between organizations, if a
+   richer multi-org-per-user model is needed later instead of the
+   simpler one-organization-per-account model above.
+
+This isn't implemented now because it's a real schema/authz migration with
+no corresponding product requirement yet (KINTSU OS today is single-brand)
+— but nothing in the current schema blocks adding it later.
+
 ## Adding a new module
 
 1. Add tables to a new `src/db/schema/<domain>.ts`, export from

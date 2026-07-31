@@ -87,6 +87,7 @@ export const notificationEventEnum = pgEnum("notification_event", [
   "PURCHASE_ORDER",
   "BIRTHDAY_OFFER",
   "ALTERATION_READY",
+  "SECURITY_CODE",
 ]);
 
 export const attendanceStatusEnum = pgEnum("attendance_status", [

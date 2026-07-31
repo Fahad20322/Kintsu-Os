@@ -14,6 +14,7 @@ import {
 } from "@/db/schema";
 import { requirePermission } from "@/lib/session";
 import { customerSchema, customerUpdateSchema } from "@/lib/validations/customer";
+import { emitEvent } from "@/lib/events";
 
 function isUniqueViolation(err: unknown): boolean {
   return (
@@ -67,7 +68,7 @@ export async function getCustomer(id: string) {
 }
 
 export async function createCustomer(rawInput: unknown) {
-  await requirePermission("customers:manage");
+  const user = await requirePermission("customers:manage");
   const input = customerSchema.parse(rawInput);
 
   try {
@@ -87,6 +88,12 @@ export async function createCustomer(rawInput: unknown) {
       .returning();
 
     revalidatePath("/customers");
+    emitEvent("customer.created", {
+      customerId: created.id,
+      name: created.name,
+      mobile: created.mobile,
+      createdById: user.id,
+    });
     return created;
   } catch (err) {
     if (isUniqueViolation(err)) {

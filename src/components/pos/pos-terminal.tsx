@@ -33,6 +33,8 @@ import {
 } from "@/actions/pos";
 import { createCustomer } from "@/actions/customers";
 import { paymentMethodValues } from "@/lib/validations/pos";
+import { queueSale } from "@/lib/offline/queue";
+import { OfflineSyncIndicator } from "@/components/pos/offline-sync-indicator";
 
 type CartLine = {
   variantId: string;
@@ -214,6 +216,16 @@ export function PosTerminal() {
     setPayments((prev) => prev.filter((_, i) => i !== index));
   }
 
+  function resetCart() {
+    setCart([]);
+    setCustomer(null);
+    setManualDiscount(0);
+    setCouponCode("");
+    setCouponDiscount(0);
+    setLoyaltyRedeem(0);
+    setPayments([{ method: "CASH", amount: 0 }]);
+  }
+
   async function handleCheckout() {
     if (cart.length === 0) {
       toast.error("Cart is empty");
@@ -224,26 +236,46 @@ export function PosTerminal() {
       return;
     }
 
+    const checkoutInput = {
+      customerId: customer?.id,
+      items: cart.map((l) => ({
+        variantId: l.variantId,
+        quantity: l.quantity,
+        unitPrice: l.unitPrice,
+        gstRate: l.gstRate,
+        discountAmount: l.discountAmount,
+      })),
+      discountAmount: manualDiscount,
+      couponCode: couponDiscount > 0 ? couponCode.trim() : undefined,
+      loyaltyPointsRedeemed: loyaltyRedeem,
+      payments,
+    };
+
+    // Offline-first: if we're already known to be offline, skip straight
+    // to queuing instead of waiting on a request that can't succeed.
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      await queueSale(checkoutInput);
+      toast.success("You're offline — sale saved and will sync automatically");
+      resetCart();
+      return;
+    }
+
     setIsSubmitting(true);
     try {
-      const result = await checkout({
-        customerId: customer?.id,
-        items: cart.map((l) => ({
-          variantId: l.variantId,
-          quantity: l.quantity,
-          unitPrice: l.unitPrice,
-          gstRate: l.gstRate,
-          discountAmount: l.discountAmount,
-        })),
-        discountAmount: manualDiscount,
-        couponCode: couponDiscount > 0 ? couponCode.trim() : undefined,
-        loyaltyPointsRedeemed: loyaltyRedeem,
-        payments,
-      });
+      const result = await checkout(checkoutInput);
       toast.success("Sale completed");
       router.push(`/pos/invoice/${result.id}`);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Checkout failed");
+      // A network-level failure (fetch couldn't even reach the server)
+      // means the request never landed — safe to queue for later retry.
+      const isNetworkError = err instanceof TypeError;
+      if (isNetworkError) {
+        await queueSale(checkoutInput);
+        toast.success("Connection lost — sale saved and will sync automatically");
+        resetCart();
+      } else {
+        toast.error(err instanceof Error ? err.message : "Checkout failed");
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -252,6 +284,9 @@ export function PosTerminal() {
   return (
     <div className="grid gap-6 lg:grid-cols-3">
       <div className="space-y-4 lg:col-span-2">
+        <div className="flex justify-end">
+          <OfflineSyncIndicator />
+        </div>
         <Card>
           <CardContent className="pt-6">
             <form onSubmit={handleScan} className="flex gap-2">

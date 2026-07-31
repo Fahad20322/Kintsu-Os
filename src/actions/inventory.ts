@@ -13,6 +13,7 @@ import {
 } from "@/db/schema";
 import { requirePermission } from "@/lib/session";
 import type { StockMovementTypeValue } from "@/lib/validations/inventory";
+import { emitEvent } from "@/lib/events";
 
 const DEFAULT_LOW_STOCK_THRESHOLD = 5;
 
@@ -239,6 +240,18 @@ export async function recordStockMovement(input: {
   revalidatePath("/inventory");
   revalidatePath("/inventory/movements");
   revalidatePath("/inventory/dead-stock");
+
+  emitEvent("inventory.updated", {
+    variantId: input.variantId,
+    storeId: user.storeId,
+    warehouseId: input.warehouseId,
+    movementType: input.type,
+    quantity: input.quantity,
+    balanceAfter: newQuantity,
+    performedById: user.id,
+    refType: "MANUAL_ADJUSTMENT",
+  });
+
   return { quantity: newQuantity };
 }
 
@@ -255,7 +268,7 @@ export async function transferStock(input: {
     throw new Error("Source and destination warehouses must differ");
   }
 
-  await db.transaction(async (tx) => {
+  const destinationBalance = await db.transaction(async (tx) => {
     await applyStockMovement(tx, {
       variantId: input.variantId,
       storeId: user.storeId!,
@@ -266,7 +279,7 @@ export async function transferStock(input: {
       refType: "STOCK_TRANSFER",
       performedById: user.id,
     });
-    await applyStockMovement(tx, {
+    return applyStockMovement(tx, {
       variantId: input.variantId,
       storeId: user.storeId!,
       warehouseId: input.toWarehouseId,
@@ -280,6 +293,17 @@ export async function transferStock(input: {
 
   revalidatePath("/inventory");
   revalidatePath("/inventory/movements");
+
+  emitEvent("inventory.updated", {
+    variantId: input.variantId,
+    storeId: user.storeId,
+    warehouseId: input.toWarehouseId,
+    movementType: "TRANSFER",
+    quantity: input.quantity,
+    balanceAfter: destinationBalance,
+    performedById: user.id,
+    refType: "STOCK_TRANSFER",
+  });
 }
 
 export async function listStockMovements(limit = 100) {

@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    name: Lint, typecheck, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Build
+        env:
+          # No page in this app is statically generated against the
+          # database (every data-fetching route reads the session via
+          # next/headers, forcing dynamic rendering), so the build never
+          # opens a real connection — a dummy URL is enough.
+          DATABASE_URL: postgresql://user:pass@localhost:5432/db
+          BETTER_AUTH_SECRET: ci-build-secret-not-used-at-runtime
+        run: npm run build
+
+  docker:
+    name: Docker build
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t kintsu-os:ci .

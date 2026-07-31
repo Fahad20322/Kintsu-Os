@@ -1,4 +1,4 @@
-import { boolean, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { boolean, integer, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 import { createId } from "@/lib/id";
 import { roleEnum } from "./enums";
 import { store } from "./store";
@@ -17,6 +17,7 @@ export const user = pgTable("user", {
   }),
   phone: text("phone"),
   isActive: boolean("is_active").notNull().default(true),
+  twoFactorEnabled: boolean("two_factor_enabled").notNull().default(false),
 
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at")
@@ -72,4 +73,17 @@ export const verification = pgTable("verification", {
     .notNull()
     .defaultNow()
     .$onUpdate(() => new Date()),
+});
+
+// Required by Better Auth's twoFactor plugin (src/lib/auth.ts).
+export const twoFactor = pgTable("two_factor", {
+  id: text("id").primaryKey().$defaultFn(() => createId()),
+  secret: text("secret").notNull(),
+  backupCodes: text("backup_codes").notNull(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  verified: boolean("verified").notNull().default(true),
+  failedVerificationCount: integer("failed_verification_count").notNull().default(0),
+  lockedUntil: timestamp("locked_until"),
 });

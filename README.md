@@ -15,6 +15,9 @@ on a multi-store-ready architecture.
 - **Recharts**, **bwip-js** (Code128 barcodes), **xlsx** (Excel export),
   **date-fns**
 - Docker / Docker Compose for containerized deployment
+- **Redis** (`ioredis`, self-hosted/Valkey/Upstash) for cache & rate
+  limiting, **S3/R2** (`@aws-sdk/client-s3`) for file storage — both
+  optional, with local-dev fallbacks (see [Module 0](./ARCHITECTURE.md#module-0--cloud-architecture))
 
 ### Why Drizzle instead of Prisma?
 
@@ -101,12 +104,25 @@ sign-up — this keeps role assignment under the Owner/Admin's control.
 ### Docker
 
 ```bash
-docker compose up -d db          # Postgres only, for local `npm run dev`
-docker compose --profile full up -d   # Postgres + the built app container
+docker compose up -d db redis    # Postgres + Redis, for local `npm run dev`
+docker compose --profile full up -d   # Postgres + Redis + the built app container
 ```
 
 The `Dockerfile` produces a Next.js standalone build; only `server.js`,
-`.next/static`, and `public` ship in the final image.
+`.next/static`, and `public` ship in the final image. It also defines a
+`HEALTHCHECK` against `/api/health` (DB connectivity), used by Docker
+Compose, load balancers, and uptime monitors.
+
+### Backups
+
+```bash
+DATABASE_URL=... ./scripts/backup.sh                              # daily/weekly/monthly pg_dump rotation
+DATABASE_URL=... ./scripts/restore.sh backups/daily/kintsu-*.sql.gz  # restore
+```
+
+Schedule `backup.sh` from cron (or your platform's scheduled jobs) for
+automatic backups; see `.env.example` for retention and optional S3/R2
+upload configuration.
 
 ## Module status
 
@@ -143,6 +159,13 @@ Management (accounts, attendance, targets, audit log), Loyalty Program
   inventory. Both are real, tested endpoints; there's simply no e-commerce
   frontend in this repo to call them yet.
 
+**Module 0 — Cloud architecture:** cache/rate-limiting, an event bus wired
+to a real audit trail, file storage (S3/R2), 2FA/OTP login, session/device
+management, a health check endpoint, automated backups, CI/CD, and offline
+POS billing. See [ARCHITECTURE.md § Module 0](./ARCHITECTURE.md#module-0--cloud-architecture)
+for what's real application code today versus what's a deployment-platform
+responsibility (HA, auto-failover, replication, CDN, multi-region).
+
 ## Role-based access control
 
 Six roles — Owner, Admin, Manager, Cashier, Sales Staff, Inventory
@@ -170,9 +193,17 @@ src/
   lib/
     ai/           Intent parser + query handlers (AI Assistant)
     notifications/  Adapter interface + WhatsApp/SMS/Email/console adapters
+    storage/      File storage adapter interface + S3/R2/local-disk adapters
+    events/       In-process business-event bus + subscribers (audit trail)
+    offline/      IndexedDB-backed offline POS queue
     export/       CSV / Excel export helpers
     validations/  Zod schemas, one file per module
-    rbac.ts, session.ts, auth.ts, barcode.ts, numbering.ts, ...
+    rbac.ts, session.ts, auth.ts, barcode.ts, numbering.ts, cache.ts,
+    rate-limit.ts, audit.ts, ...
+  proxy.ts        Auth guard + rate limiting (Next.js 16 renamed
+                  middleware.ts -> proxy.ts)
+scripts/
+  backup.sh, restore.sh  Postgres backup/restore
 ```
 
 ## Verification

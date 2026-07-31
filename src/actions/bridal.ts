@@ -19,6 +19,7 @@ import {
   bridalOutfitStatusValues,
   type MeasurementsInput,
 } from "@/lib/validations/bridal";
+import { emitEvent } from "@/lib/events";
 
 function parseMeasurements(raw: string | null): MeasurementsInput {
   if (!raw) return {};
@@ -213,6 +214,12 @@ export async function updateBridalStatus(
 ) {
   const user = await requirePermission("bridal:manage");
 
+  const [existing] = await db
+    .select({ status: bridalOrder.status, storeId: bridalOrder.storeId })
+    .from(bridalOrder)
+    .where(eq(bridalOrder.id, id));
+  if (!existing) throw new Error("Bridal order not found");
+
   await db.transaction(async (tx) => {
     await tx
       .update(bridalOrder)
@@ -235,6 +242,14 @@ export async function updateBridalStatus(
 
   revalidatePath("/bridal");
   revalidatePath(`/bridal/${id}`);
+
+  emitEvent("bridal.status_changed", {
+    bridalOrderId: id,
+    storeId: existing.storeId,
+    fromStatus: existing.status,
+    toStatus: status,
+    changedById: user.id,
+  });
 }
 
 export async function addBridalTrial(bridalOrderId: string, rawInput: unknown) {

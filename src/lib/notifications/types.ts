@@ -103,4 +103,11 @@ export const NOTIFICATION_TEMPLATES: Record<
       data
     ),
   }),
+  SECURITY_CODE: (data) => ({
+    subject: "Your Kintsu OS verification code",
+    body: interpolate(
+      "Your verification code is {code}. It expires in {expiresInMinutes} minutes. Do not share this code with anyone.",
+      data
+    ),
+  }),
 };

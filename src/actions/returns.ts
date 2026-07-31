@@ -17,6 +17,7 @@ import {
 } from "@/db/schema";
 import { requirePermission } from "@/lib/session";
 import { returnItemSchema, exchangeItemSchema } from "@/lib/validations/pos";
+import { logAudit } from "@/lib/audit";
 
 async function getDefaultWarehouseId(storeId: string) {
   const [wh] = await db
@@ -123,6 +124,16 @@ export async function processReturn(rawInput: unknown) {
   revalidatePath(`/pos/invoice/${item.saleId}`);
   revalidatePath("/pos/history");
   revalidatePath("/inventory");
+
+  await logAudit({
+    userId: user.id,
+    storeId: user.storeId,
+    action: "SALE_RETURN_PROCESSED",
+    entityType: "sale",
+    entityId: item.saleId,
+    metadata: { saleItemId: item.id, quantity: input.quantity, refundAmount, reason: input.reason },
+  });
+
   return { refundAmount };
 }
 
@@ -242,6 +253,21 @@ export async function processExchange(rawInput: unknown) {
 
   revalidatePath(`/pos/invoice/${original.saleId}`);
   revalidatePath("/inventory");
+
+  await logAudit({
+    userId: user.id,
+    storeId: user.storeId,
+    action: "SALE_EXCHANGE_PROCESSED",
+    entityType: "sale",
+    entityId: original.saleId,
+    metadata: {
+      originalSaleItemId: original.id,
+      returnedQuantity: input.returnedQuantity,
+      newVariantId: input.newVariantId,
+      newQuantity: input.newQuantity,
+      priceDifference,
+    },
+  });
 
   return { priceDifference };
 }

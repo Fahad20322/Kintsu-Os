@@ -13,6 +13,7 @@ import { DiscountLoyaltyForm } from "@/components/settings/discount-loyalty-form
 import { BarcodePrinterForm } from "@/components/settings/barcode-printer-form";
 import { PaymentMethodsForm } from "@/components/settings/payment-methods-form";
 import { BackupRestorePanel } from "@/components/settings/backup-restore-panel";
+import { SecurityPanel } from "@/components/settings/security-panel";
 
 type StoreRow = typeof store.$inferSelect;
 type StoreSettingsRow = typeof storeSettings.$inferSelect;
@@ -33,6 +34,7 @@ export function SettingsTabs({
         <TabsTrigger value="barcode-printer">Barcode & Printer</TabsTrigger>
         <TabsTrigger value="payment-methods">Payment Methods</TabsTrigger>
         <TabsTrigger value="backup-restore">Backup & Restore</TabsTrigger>
+        <TabsTrigger value="security">Security</TabsTrigger>
       </TabsList>
 
       <TabsContent value="store-details">
@@ -52,6 +54,9 @@ export function SettingsTabs({
       </TabsContent>
       <TabsContent value="backup-restore">
         <BackupRestorePanel />
+      </TabsContent>
+      <TabsContent value="security">
+        <SecurityPanel />
       </TabsContent>
     </Tabs>
   );

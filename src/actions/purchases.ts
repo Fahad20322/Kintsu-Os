@@ -18,6 +18,8 @@ import {
 import { requirePermission } from "@/lib/session";
 import { nextGrnNumber, nextPoNumber } from "@/lib/numbering";
 import { grnReceiveSchema, purchaseOrderSchema } from "@/lib/validations/vendor";
+import { emitEvent } from "@/lib/events";
+import { logAudit } from "@/lib/audit";
 
 type PurchaseOrderStatus = (typeof purchaseOrderStatusEnum.enumValues)[number];
 
@@ -84,6 +86,16 @@ export async function createPurchaseOrder(rawInput: unknown) {
   });
 
   revalidatePath("/purchases");
+
+  await logAudit({
+    userId: user.id,
+    storeId: user.storeId,
+    action: "PURCHASE_ORDER_CREATED",
+    entityType: "purchaseOrder",
+    entityId: created.id,
+    metadata: { poNumber: created.poNumber, vendorId: input.vendorId, totalAmount },
+  });
+
   return created;
 }
 
@@ -207,12 +219,14 @@ export async function receiveGrn(rawInput: unknown) {
     }
   }
 
+  let vendorId = "";
   const createdGrn = await db.transaction(async (tx) => {
     const [po] = await tx
       .select()
       .from(purchaseOrder)
       .where(eq(purchaseOrder.id, input.purchaseOrderId));
     if (!po) throw new Error("Purchase order not found");
+    vendorId = po.vendorId;
     if (po.status === "CANCELLED") {
       throw new Error("Cannot receive stock against a cancelled purchase order");
     }
@@ -348,11 +362,20 @@ export async function receiveGrn(rawInput: unknown) {
   revalidatePath(`/purchases/${input.purchaseOrderId}`);
   revalidatePath("/purchases");
   revalidatePath("/inventory");
+
+  emitEvent("purchase.received", {
+    grnId: createdGrn.id,
+    purchaseOrderId: input.purchaseOrderId,
+    storeId: user.storeId,
+    vendorId,
+    receivedById: user.id,
+  });
+
   return createdGrn;
 }
 
 export async function cancelPurchaseOrder(id: string) {
-  await requirePermission("purchases:manage");
+  const user = await requirePermission("purchases:manage");
 
   const [po] = await db.select().from(purchaseOrder).where(eq(purchaseOrder.id, id));
   if (!po) throw new Error("Purchase order not found");
@@ -373,4 +396,13 @@ export async function cancelPurchaseOrder(id: string) {
 
   revalidatePath("/purchases");
   revalidatePath(`/purchases/${id}`);
+
+  await logAudit({
+    userId: user.id,
+    storeId: user.storeId,
+    action: "PURCHASE_ORDER_CANCELLED",
+    entityType: "purchaseOrder",
+    entityId: id,
+    metadata: { poNumber: po.poNumber },
+  });
 }

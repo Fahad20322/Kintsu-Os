@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useFieldArray, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
-import { Plus, Trash2, Wand2 } from "lucide-react";
+import { Plus, Trash2, Wand2, Upload, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -41,6 +41,7 @@ import {
   type ProductFormValues,
 } from "@/lib/validations/product";
 import { createProduct } from "@/actions/products";
+import { uploadProductImage } from "@/actions/uploads";
 import {
   createBrand,
   createCategory,
@@ -68,6 +69,7 @@ export function ProductForm({
   const [brands, setBrands] = React.useState(taxonomy.brands);
   const [collections, setCollections] = React.useState(taxonomy.collections);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
+  const [isUploading, setIsUploading] = React.useState(false);
 
   const form = useForm<ProductFormValues, unknown, ProductInput>({
     resolver: zodResolver(productSchema),
@@ -109,6 +111,32 @@ export function ProductForm({
       generateSku(articleCode || "ART", size, color)
     );
     form.setValue(`variants.${index}.barcode`, generateBarcodeValue());
+  }
+
+  async function handleImageUpload(fileList: FileList | null) {
+    if (!fileList || fileList.length === 0) return;
+    setIsUploading(true);
+    try {
+      const uploaded: string[] = [];
+      for (const file of Array.from(fileList)) {
+        const formData = new FormData();
+        formData.set("file", file);
+        const { url } = await uploadProductImage(formData);
+        uploaded.push(url);
+      }
+      form.setValue("images", [...(form.getValues("images") ?? []), ...uploaded]);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not upload image");
+    } finally {
+      setIsUploading(false);
+    }
+  }
+
+  function removeImage(url: string) {
+    form.setValue(
+      "images",
+      (form.getValues("images") ?? []).filter((u) => u !== url)
+    );
   }
 
   async function onSubmit(values: ProductInput) {
@@ -350,6 +378,55 @@ export function ProductForm({
           <div className="space-y-2">
             <Label>GST rate (%)</Label>
             <Input type="number" step="0.01" {...form.register("gstRate")} />
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Images</CardTitle>
+          <CardDescription>
+            Uploaded to cloud file storage (S3/R2 in production, local disk in dev).
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-wrap gap-3">
+            {(form.watch("images") ?? []).map((url) => (
+              <div key={url} className="relative">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={url}
+                  alt="Product"
+                  className="size-24 rounded border object-cover"
+                />
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="icon"
+                  className="absolute -right-2 -top-2 size-6"
+                  onClick={() => removeImage(url)}
+                >
+                  <X className="size-3" />
+                </Button>
+              </div>
+            ))}
+          </div>
+          <div>
+            <Label htmlFor="product-images" className="cursor-pointer">
+              <div className="flex items-center gap-2 rounded border border-dashed px-4 py-3 text-sm text-muted-foreground hover:bg-accent">
+                <Upload className="size-4" />
+                {isUploading ? "Uploading..." : "Click to upload image(s)"}
+              </div>
+            </Label>
+            <Input
+              id="product-images"
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/gif"
+              multiple
+              className="hidden"
+              disabled={isUploading}
+              onChange={(e) => handleImageUpload(e.target.files)}
+            />
           </div>
         </CardContent>
       </Card>

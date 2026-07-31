@@ -13,6 +13,7 @@ import {
 import { requirePermission } from "@/lib/session";
 import { productSchema } from "@/lib/validations/product";
 import { generateBarcodeValue, generateSku } from "@/lib/barcode";
+import { logAudit } from "@/lib/audit";
 
 async function getDefaultWarehouseId(storeId: string) {
   const [wh] = await db
@@ -151,8 +152,13 @@ export async function createProduct(rawInput: unknown) {
 }
 
 export async function updateProduct(id: string, rawInput: unknown) {
-  await requirePermission("products:manage");
+  const user = await requirePermission("products:manage");
   const input = productSchema.omit({ variants: true }).parse(rawInput);
+
+  const [before] = await db
+    .select({ sellingPrice: product.sellingPrice, mrp: product.mrp })
+    .from(product)
+    .where(eq(product.id, id));
 
   const [updated] = await db
     .update(product)
@@ -183,6 +189,26 @@ export async function updateProduct(id: string, rawInput: unknown) {
 
   revalidatePath("/products");
   revalidatePath(`/products/${id}`);
+
+  const priceChanged =
+    before && (before.sellingPrice !== updated.sellingPrice || before.mrp !== updated.mrp);
+
+  await logAudit({
+    userId: user.id,
+    storeId: user.storeId,
+    action: priceChanged ? "PRODUCT_PRICE_CHANGED" : "PRODUCT_UPDATED",
+    entityType: "product",
+    entityId: id,
+    metadata: priceChanged
+      ? {
+          previousSellingPrice: before?.sellingPrice,
+          newSellingPrice: updated.sellingPrice,
+          previousMrp: before?.mrp,
+          newMrp: updated.mrp,
+        }
+      : undefined,
+  });
+
   return updated;
 }
 
@@ -245,7 +271,15 @@ export async function addVariant(
 }
 
 export async function toggleProductActive(id: string, isActive: boolean) {
-  await requirePermission("products:manage");
+  const user = await requirePermission("products:manage");
   await db.update(product).set({ isActive }).where(eq(product.id, id));
   revalidatePath("/products");
+
+  await logAudit({
+    userId: user.id,
+    storeId: user.storeId,
+    action: isActive ? "PRODUCT_RESTORED" : "PRODUCT_DELETED",
+    entityType: "product",
+    entityId: id,
+  });
 }

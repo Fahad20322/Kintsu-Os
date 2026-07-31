@@ -23,6 +23,7 @@ import { requirePermission } from "@/lib/session";
 import { hasPermission, type Role } from "@/lib/rbac";
 import { nextInvoiceNumber } from "@/lib/numbering";
 import { checkoutSchema, type CheckoutInput } from "@/lib/validations/pos";
+import { emitEvent } from "@/lib/events";
 
 function round2(n: number) {
   return Math.round((n + Number.EPSILON) * 100) / 100;
@@ -110,6 +111,18 @@ export async function checkout(rawInput: unknown) {
   const input: CheckoutInput = checkoutSchema.parse(rawInput);
 
   if (!user.storeId) throw new Error("No store associated with this account");
+
+  // Offline POS replay safety: if this exact request already went through
+  // (e.g. the sync retried after the response was lost on a flaky
+  // connection), return the existing sale instead of billing twice.
+  if (input.clientRequestId) {
+    const [existing] = await db
+      .select()
+      .from(sale)
+      .where(eq(sale.clientRequestId, input.clientRequestId));
+    if (existing) return existing;
+  }
+
   const warehouseId = await getDefaultWarehouseId(user.storeId);
   if (!warehouseId) throw new Error("No default warehouse configured for this store");
 
@@ -239,6 +252,7 @@ export async function checkout(rawInput: unknown) {
         loyaltyPointsRedeemed: input.loyaltyPointsRedeemed,
         status: "COMPLETED",
         notes: input.notes,
+        clientRequestId: input.clientRequestId || null,
       })
       .returning();
 
@@ -356,6 +370,23 @@ export async function checkout(rawInput: unknown) {
   revalidatePath("/pos/history");
   revalidatePath("/inventory");
   revalidatePath("/dashboard");
+
+  emitEvent("sale.completed", {
+    saleId: createdSale.id,
+    storeId: user.storeId,
+    invoiceNumber,
+    totalAmount,
+    cashierId: user.id,
+    customerId: input.customerId || null,
+  });
+  if (loyaltyPointsEarned > 0 && input.customerId) {
+    emitEvent("loyalty.points_earned", {
+      customerId: input.customerId,
+      points: loyaltyPointsEarned,
+      refType: "SALE",
+      refId: createdSale.id,
+    });
+  }
 
   return createdSale;
 }

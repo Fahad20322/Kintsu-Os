@@ -32,6 +32,9 @@ export const checkoutSchema = z.object({
   loyaltyPointsRedeemed: z.coerce.number().int().min(0).default(0),
   payments: z.array(paymentSplitSchema).min(1, "Add at least one payment"),
   notes: z.string().optional(),
+  // Set by the offline POS queue (src/lib/offline/) so a retried/replayed
+  // checkout can be recognized as a duplicate instead of double-billing.
+  clientRequestId: z.string().optional(),
 });
 
 export type CheckoutInput = z.output<typeof checkoutSchema>;
